@@ -3121,12 +3121,17 @@ test(
   'a sign-in that expires without returning records one timeout',
   { skip: !process.env.TEST_DATABASE_URL },
   async (t) => {
-    for (const ending of ['returns late', 'cancelled late', 'connected'] as const)
+    for (const ending of [
+      'returns late',
+      'returns during expiry',
+      'cancelled late',
+      'connected',
+    ] as const)
       await t.test(ending, async (t) => {
-        const expiries: Array<() => Promise<void>> = [];
+        const expiries: Array<() => Promise<unknown>> = [];
         const schedule = globalThis.setTimeout;
         t.mock.method(globalThis, 'setTimeout', ((
-          callback: () => Promise<void>,
+          callback: () => Promise<unknown>,
           delay?: number,
           ...rest: unknown[]
         ) =>
@@ -3164,12 +3169,15 @@ test(
           return;
         }
         await f.pool.query("UPDATE app_connections SET callback_expires=now()-interval '1 second'");
-        await expiries[0]!();
+        const recording = expiries[0]!();
         const expired = [
           ['started', undefined],
           ['failed', 'timeout'],
         ];
-        assert.deepEqual(changes(), expired);
+        if (ending !== 'returns during expiry') {
+          await recording;
+          assert.deepEqual(changes(), expired);
+        }
         if (ending === 'cancelled late')
           assert.equal(
             (
@@ -3187,6 +3195,7 @@ test(
           new URL((await finish()).headers.location!).searchParams.get('connection'),
           'expired',
         );
+        await recording;
         assert.deepEqual(changes(), expired);
       });
   },

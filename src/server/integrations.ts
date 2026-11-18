@@ -332,22 +332,25 @@ export async function createIntegrations(pool: Pool, options: IntegrationOptions
   function connectionFailure(error: unknown) {
     return serviceFailureReason(error);
   }
-  const expiredSignIns = new Set<string>();
+  const expiredSignIns = new Map<string, Promise<boolean>>();
   function watchExpiry(slug: string, hash: string) {
     setTimeout(
-      () =>
-        pool
+      () => {
+        const recorded = pool
           .query(
             `SELECT 1 FROM app_connections WHERE owner_id=$1 AND callback_hash=$2
              AND callback_claim_id IS NULL AND callback_expires<=now()`,
             [configuredOwner, hash],
           )
           .then(({ rowCount }) => {
-            if (!rowCount) return;
-            expiredSignIns.add(hash);
-            track(slug, 'failed', 'timeout', { step: 'sign_in' });
+            if (rowCount) track(slug, 'failed', 'timeout', { step: 'sign_in' });
+            return Boolean(rowCount);
           })
-          .catch(() => {}),
+          .catch(() => false);
+        expiredSignIns.set(hash, recorded);
+        setTimeout(() => expiredSignIns.delete(hash), 24 * 60 * 60_000).unref();
+        return recorded;
+      },
       10 * 60_000 + 1000,
     ).unref();
   }
@@ -1124,7 +1127,7 @@ export async function createIntegrations(pool: Pool, options: IntegrationOptions
     let abandoned = (await options.discovered?.abandonSetup(linkHash, reason)) ?? false;
     for (const row of rows)
       if ((await clearReconnect(row.id, row.callback_hash!)) !== undefined) {
-        if (!expiredSignIns.delete(row.callback_hash!))
+        if (!(await expiredSignIns.get(row.callback_hash!)))
           track(row.slug, 'failed', reason, { step: 'sign_in' });
         abandoned = true;
       }
@@ -2866,7 +2869,7 @@ export async function createIntegrations(pool: Pool, options: IntegrationOptions
                 }
               } else if (
                 (await clearReconnect(row.id, hash, undefined, true)) !== undefined &&
-                !expiredSignIns.delete(hash)
+                !(await expiredSignIns.get(hash))
               )
                 track(row.slug, 'failed', 'timeout', { step: 'callback' });
             }
