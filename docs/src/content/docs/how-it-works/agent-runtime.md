@@ -223,7 +223,7 @@ Anthropic rejects a whole request when one tool schema doesn't match JSON Schema
 
 Nod keeps one MCP connection per account and address for a minute after its last call, caches each server's tool list for ten minutes and waits up to ten minutes for one call.
 
-Calls from different sessions share that connection. When one call is stopped or times out, only that call ends. Nod opens a new connection for later calls and closes the old one when its other calls finish. A network or server failure closes the connection and ends every call on it.
+Calls from different sessions share that connection. When one call is stopped or times out, only that call ends. Nod opens a new connection for later calls and closes the old one when its other calls finish. An error reply from the server also ends only its own call. A network failure or a lost connection ends every call on it.
 
 When a known tool list expires, a new turn uses the last successful list while Nod refreshes it. It does not wait for that refresh. The first load still waits for the server. Explicit tool searches wait for a current list. Each turn checks the connected accounts again, and each tool call checks its account binding and permission before it runs.
 
