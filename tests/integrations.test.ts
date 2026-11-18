@@ -1462,6 +1462,16 @@ test('a stopped remote MCP call ends alone and leaves other calls on the shared 
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(chunk as Buffer);
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : undefined;
+    if (body?.method === 'tools/call' && body.params?.name === 'server-error') {
+      response.writeHead(200, { 'content-type': 'application/json' }).end(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: body.id,
+          error: { code: -32000, message: 'Synthetic server error.' },
+        }),
+      );
+      return;
+    }
     const existing = sessions.get(String(request.headers['mcp-session-id']));
     if (existing) {
       await existing.handleRequest(request, response, body);
@@ -1502,6 +1512,10 @@ test('a stopped remote MCP call ends alone and leaves other calls on the shared 
   const stop = new AbortController();
   const silent = transport.callTool(endpoint, headers, 'silent', {}, stop.signal);
   await silentStarted;
+  await assert.rejects(
+    transport.callTool(endpoint, headers, 'server-error', {}),
+    /Synthetic server error\./,
+  );
   stop.abort(new Error('Synthetic stop.'));
   await assert.rejects(silent, /Synthetic stop\./);
   finish();

@@ -9,7 +9,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport, SseError } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { RequestOptions } from '@modelcontextprotocol/sdk/shared/protocol.js';
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { isPublicAddress, publicUrl } from '../agent-browser/network.ts';
 import type { DiscoveredTool, DiscoveredTransport } from '../../ports/discovered.ts';
 import { appFile, mcpFiles } from '../app-files.ts';
@@ -277,8 +277,9 @@ async function withRemoteMcp<T>(
   const current = entry;
   current.active++;
   clearTimeout(current.timer);
+  let client: Client | undefined;
   try {
-    const client = await (signal
+    client = await (signal
       ? Promise.race([
           current.ready,
           new Promise<never>((_resolve, reject) =>
@@ -295,8 +296,7 @@ async function withRemoteMcp<T>(
     signal?.throwIfAborted();
     return result;
   } catch (cause) {
-    const alone =
-      signal?.aborted || (cause instanceof McpError && cause.code !== ErrorCode.ConnectionClosed);
+    const alone = signal?.aborted || (cause instanceof McpError && client?.transport);
     if (current.active > 1 && alone) {
       if (pool.get(key) === current) pool.delete(key);
     } else release(pool, key, current);
