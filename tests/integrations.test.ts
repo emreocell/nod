@@ -1443,91 +1443,95 @@ test('remote MCP falls back to HTTP+SSE only when the server refuses Streamable 
   assert.deepEqual(streams, ['legacy', 'legacy', 'legacy']);
 });
 
-test('a stopped remote MCP call ends alone and leaves other calls on the shared connection running', async (t) => {
-  const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
-  const { StreamableHTTPServerTransport } =
-    await import('@modelcontextprotocol/sdk/server/streamableHttp.js');
-  const { isInitializeRequest } = await import('@modelcontextprotocol/sdk/types.js');
-  const sessions = new Map<string, InstanceType<typeof StreamableHTTPServerTransport>>();
-  let finish!: () => void;
-  const finished = new Promise<void>((resolve) => (finish = resolve));
-  let started!: () => void;
-  const silentStarted = new Promise<void>((resolve) => (started = resolve));
-  const open = new Set<object>();
-  const server = createServer(async (request, response) => {
-    if (request.method === 'POST') {
-      open.add(response);
-      response.on('close', () => open.delete(response));
-    }
-    const chunks: Buffer[] = [];
-    for await (const chunk of request) chunks.push(chunk as Buffer);
-    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : undefined;
-    if (body?.method === 'tools/call' && body.params?.name === 'server-error') {
-      response.writeHead(200, { 'content-type': 'application/json' }).end(
-        JSON.stringify({
-          jsonrpc: '2.0',
-          id: body.id,
-          error: { code: -32000, message: 'Synthetic server error.' },
-        }),
-      );
-      return;
-    }
-    const existing = sessions.get(String(request.headers['mcp-session-id']));
-    if (existing) {
-      await existing.handleRequest(request, response, body);
-      return;
-    }
-    if (!isInitializeRequest(body)) {
-      response.writeHead(404).end();
-      return;
-    }
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => randomUUID(),
-      onsessioninitialized: (id) => void sessions.set(id, transport),
+test(
+  'a stopped remote MCP call ends alone and leaves other calls on the shared connection running',
+  { timeout: 10_000 },
+  async (t) => {
+    const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
+    const { StreamableHTTPServerTransport } =
+      await import('@modelcontextprotocol/sdk/server/streamableHttp.js');
+    const { isInitializeRequest } = await import('@modelcontextprotocol/sdk/types.js');
+    const sessions = new Map<string, InstanceType<typeof StreamableHTTPServerTransport>>();
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => (finish = resolve));
+    let started!: () => void;
+    const silentStarted = new Promise<void>((resolve) => (started = resolve));
+    const open = new Set<object>();
+    const server = createServer(async (request, response) => {
+      if (request.method === 'POST') {
+        open.add(response);
+        response.on('close', () => open.delete(response));
+      }
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(chunk as Buffer);
+      const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : undefined;
+      if (body?.method === 'tools/call' && body.params?.name === 'server-error') {
+        response.writeHead(200, { 'content-type': 'application/json' }).end(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: body.id,
+            error: { code: -32000, message: 'Synthetic server error.' },
+          }),
+        );
+        return;
+      }
+      const existing = sessions.get(String(request.headers['mcp-session-id']));
+      if (existing) {
+        await existing.handleRequest(request, response, body);
+        return;
+      }
+      if (!isInitializeRequest(body)) {
+        response.writeHead(404).end();
+        return;
+      }
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        onsessioninitialized: (id) => void sessions.set(id, transport),
+      });
+      const mcp = new McpServer({ name: 'synthetic-shared', version: '1' });
+      mcp.registerTool('long-report', { description: 'Long' }, async () => {
+        await finished;
+        return { content: [{ type: 'text', text: 'synthetic long report' }] };
+      });
+      mcp.registerTool('silent', { description: 'Silent' }, async (extra) => {
+        started();
+        await new Promise((resolve) => extra.signal.addEventListener('abort', resolve));
+        return { content: [] };
+      });
+      await mcp.connect(transport);
+      await transport.handleRequest(request, response, body);
     });
-    const mcp = new McpServer({ name: 'synthetic-shared', version: '1' });
-    mcp.registerTool('long-report', { description: 'Long' }, async () => {
-      await finished;
-      return { content: [{ type: 'text', text: 'synthetic long report' }] };
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    t.after(async () => {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     });
-    mcp.registerTool('silent', { description: 'Silent' }, async (extra) => {
-      started();
-      await new Promise((resolve) => extra.signal.addEventListener('abort', resolve));
-      return { content: [] };
+    const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    const endpoint = `${origin}/mcp`;
+    const transport = createDiscoveredTransport(ownerFetch(origin), async (value) => value);
+    const headers = { authorization: 'Bearer synthetic-shared-token' };
+    const long = transport.callTool(endpoint, headers, 'long-report', {});
+    long.catch(() => {});
+    const stop = new AbortController();
+    const silent = transport.callTool(endpoint, headers, 'silent', {}, stop.signal);
+    await silentStarted;
+    await assert.rejects(
+      transport.callTool(endpoint, headers, 'server-error', {}),
+      /Synthetic server error\./,
+    );
+    stop.abort(new Error('Synthetic stop.'));
+    await assert.rejects(silent, /Synthetic stop\./);
+    finish();
+    assert.deepEqual(await long, {
+      content: [{ type: 'text', text: 'synthetic long report' }],
     });
-    await mcp.connect(transport);
-    await transport.handleRequest(request, response, body);
-  });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  t.after(async () => {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  });
-  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  const endpoint = `${origin}/mcp`;
-  const transport = createDiscoveredTransport(ownerFetch(origin), async (value) => value);
-  const headers = { authorization: 'Bearer synthetic-shared-token' };
-  const long = transport.callTool(endpoint, headers, 'long-report', {});
-  long.catch(() => {});
-  const stop = new AbortController();
-  const silent = transport.callTool(endpoint, headers, 'silent', {}, stop.signal);
-  await silentStarted;
-  await assert.rejects(
-    transport.callTool(endpoint, headers, 'server-error', {}),
-    /Synthetic server error\./,
-  );
-  stop.abort(new Error('Synthetic stop.'));
-  await assert.rejects(silent, /Synthetic stop\./);
-  finish();
-  assert.deepEqual(await long, {
-    content: [{ type: 'text', text: 'synthetic long report' }],
-  });
-  for (let wait = 0; open.size && wait < 100; wait++) await delay(10);
-  assert.equal(open.size, 0);
-  assert.deepEqual(await transport.callTool(endpoint, headers, 'long-report', {}), {
-    content: [{ type: 'text', text: 'synthetic long report' }],
-  });
-});
+    for (let wait = 0; open.size && wait < 100; wait++) await delay(10);
+    assert.equal(open.size, 0);
+    assert.deepEqual(await transport.callTool(endpoint, headers, 'long-report', {}), {
+      content: [{ type: 'text', text: 'synthetic long report' }],
+    });
+  },
+);
 
 test(
   'installation identity checkpoints prevent replacement after file loss and recover interrupted first initialization',

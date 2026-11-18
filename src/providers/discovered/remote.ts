@@ -193,7 +193,12 @@ export async function safeRemoteFetch(
   });
 }
 
-type PooledClient = { ready: Promise<Client>; active: number; timer?: NodeJS.Timeout };
+type PooledClient = {
+  ready: Promise<Client>;
+  active: number;
+  timer?: NodeJS.Timeout;
+  closed?: boolean;
+};
 
 const idleMs = 60_000;
 const requestTimeoutMs = 600_000;
@@ -208,6 +213,8 @@ function poolFor(request: typeof safeRemoteFetch) {
 function release(pool: Map<string, PooledClient>, key: string, entry: PooledClient) {
   if (pool.get(key) === entry) pool.delete(key);
   clearTimeout(entry.timer);
+  if (entry.closed) return;
+  entry.closed = true;
   void entry.ready.then((client) => client.close()).catch(() => {});
 }
 
@@ -296,8 +303,8 @@ async function withRemoteMcp<T>(
     signal?.throwIfAborted();
     return result;
   } catch (cause) {
-    const alone = signal?.aborted || (cause instanceof McpError && client?.transport);
-    if (current.active > 1 && alone) {
+    const perCall = signal?.aborted || (cause instanceof McpError && client?.transport);
+    if (current.active > 1 && perCall) {
       if (pool.get(key) === current) pool.delete(key);
     } else release(pool, key, current);
     throw cause;
