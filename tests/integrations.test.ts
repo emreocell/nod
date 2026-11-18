@@ -3117,6 +3117,81 @@ test('hosted connection attempts fail closed after expiry or invalid startup', a
   }
 });
 
+test(
+  'a sign-in that expires without returning records one timeout',
+  { skip: !process.env.TEST_DATABASE_URL },
+  async (t) => {
+    for (const ending of ['returns late', 'cancelled late', 'connected'] as const)
+      await t.test(ending, async (t) => {
+        const expiries: Array<() => Promise<void>> = [];
+        const schedule = globalThis.setTimeout;
+        t.mock.method(globalThis, 'setTimeout', ((
+          callback: () => Promise<void>,
+          delay?: number,
+          ...rest: unknown[]
+        ) =>
+          delay === 601_000
+            ? (expiries.push(callback), { unref() {} })
+            : schedule(callback, delay, ...rest)) as unknown as typeof setTimeout);
+        const captured: import('../src/server/analytics.ts').AnalyticsEvent[] = [];
+        const changes = () =>
+          captured.flatMap((entry) =>
+            entry.event === 'connection_changed'
+              ? [[entry.properties.status, entry.properties.failure_reason]]
+              : [],
+          );
+        const f = await appsFixture(t, {}, { analytics: (event) => captured.push(event) });
+        const started = await f.app.inject({
+          method: 'POST',
+          url: '/api/apps/gmail/connect',
+          payload: { returnTo: 'window' },
+        });
+        assert.equal(started.statusCode, 200, started.body);
+        assert.equal(expiries.length, 1);
+        const callback = new URL(f.callbacks.at(-1)!);
+        callback.searchParams.set('account', [...f.accounts.keys()].at(-1)!);
+        const finish = () => f.app.inject({ url: callback.pathname + callback.search });
+        if (ending === 'connected') {
+          assert.equal(
+            new URL((await finish()).headers.location!).searchParams.get('connection'),
+            'connected',
+          );
+          await expiries[0]!();
+          assert.deepEqual(changes(), [
+            ['started', undefined],
+            ['connected', undefined],
+          ]);
+          return;
+        }
+        await f.pool.query("UPDATE app_connections SET callback_expires=now()-interval '1 second'");
+        await expiries[0]!();
+        const expired = [
+          ['started', undefined],
+          ['failed', 'timeout'],
+        ];
+        assert.deepEqual(changes(), expired);
+        if (ending === 'cancelled late')
+          assert.equal(
+            (
+              await f.app.inject({
+                method: 'POST',
+                url: '/api/apps/setup-cancel',
+                payload: {
+                  hash: createHash('sha256').update(new URL(started.json().url).href).digest('hex'),
+                },
+              })
+            ).statusCode,
+            200,
+          );
+        assert.equal(
+          new URL((await finish()).headers.location!).searchParams.get('connection'),
+          'expired',
+        );
+        assert.deepEqual(changes(), expired);
+      });
+  },
+);
+
 test('connection bridges record the step where an expired attempt stopped', async (t) => {
   const brokerOrigin = 'https://proxy.example.test';
   const pair = `${brokerOrigin}/v2/connect/pair?ticket=synthetic-expiry`;
@@ -3146,8 +3221,8 @@ test('connection bridges record the step where an expired attempt stopped', asyn
     for (const [step, reached] of [
       ['open', 0],
       ['start', 1],
-      ['consent', 2],
-      ['callback', 3],
+      ['pair', 2],
+      ['consent', 3],
       [undefined, 4],
     ] as const) {
       const id = randomBytes(32).toString('base64url');

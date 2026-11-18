@@ -332,6 +332,25 @@ export async function createIntegrations(pool: Pool, options: IntegrationOptions
   function connectionFailure(error: unknown) {
     return serviceFailureReason(error);
   }
+  const expiredSignIns = new Set<string>();
+  function watchExpiry(slug: string, hash: string) {
+    setTimeout(
+      () =>
+        pool
+          .query(
+            `SELECT 1 FROM app_connections WHERE owner_id=$1 AND callback_hash=$2
+             AND callback_claim_id IS NULL AND callback_expires<=now()`,
+            [configuredOwner, hash],
+          )
+          .then(({ rowCount }) => {
+            if (!rowCount) return;
+            expiredSignIns.add(hash);
+            track(slug, 'failed', 'timeout', { step: 'sign_in' });
+          })
+          .catch(() => {}),
+      10 * 60_000 + 1000,
+    ).unref();
+  }
   const providerId = z
     .string()
     .regex(/^[a-z][a-z0-9-]{0,39}$/)
@@ -951,6 +970,7 @@ export async function createIntegrations(pool: Pool, options: IntegrationOptions
     if (active.length >= 10)
       throw new IntegrationError('This service supports up to ten connected accounts.', 409);
     const nonce = randomBytes(32).toString('base64url');
+    const hash = createHash('sha256').update(nonce).digest('hex');
     const callbackUrl = new URL('/api/apps/callback', options.baseUrl);
     callbackUrl.searchParams.set('state', nonce);
     const configurationId = provider.configurationId;
@@ -1017,7 +1037,7 @@ export async function createIntegrations(pool: Pool, options: IntegrationOptions
             configuredOwner,
             slug,
             attempt.accountId,
-            createHash('sha256').update(nonce).digest('hex'),
+            hash,
             providerId,
             returnTo,
             turn?.turnId ?? null,
@@ -1045,6 +1065,7 @@ export async function createIntegrations(pool: Pool, options: IntegrationOptions
         client.release();
       }
       for (const previous of discarded) await discardReconnect(previous);
+      watchExpiry(slug, hash);
       return {
         url: attempt.url,
         ...(returnTo === 'window' || returnTo === 'desktop' ? { attempt: nonce } : {}),
@@ -1103,7 +1124,8 @@ export async function createIntegrations(pool: Pool, options: IntegrationOptions
     let abandoned = (await options.discovered?.abandonSetup(linkHash, reason)) ?? false;
     for (const row of rows)
       if ((await clearReconnect(row.id, row.callback_hash!)) !== undefined) {
-        track(row.slug, 'failed', reason, { step: 'sign_in' });
+        if (!expiredSignIns.delete(row.callback_hash!))
+          track(row.slug, 'failed', reason, { step: 'sign_in' });
         abandoned = true;
       }
     return abandoned;
@@ -1219,6 +1241,7 @@ export async function createIntegrations(pool: Pool, options: IntegrationOptions
         'INSERT INTO app_setup_links(owner_id,link_hash,slug) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',
         [configuredOwner, createHash('sha256').update(redirect.href).digest('hex'), slug],
       );
+      watchExpiry(slug, hash);
       return {
         url: attempt.url,
         ...(returnTo === 'window' || returnTo === 'desktop' ? { attempt: nonce } : {}),
@@ -2841,7 +2864,10 @@ export async function createIntegrations(pool: Pool, options: IntegrationOptions
                 } finally {
                   activeCallbackClaims.delete(claimId);
                 }
-              } else if ((await clearReconnect(row.id, hash, undefined, true)) !== undefined)
+              } else if (
+                (await clearReconnect(row.id, hash, undefined, true)) !== undefined &&
+                !expiredSignIns.delete(hash)
+              )
                 track(row.slug, 'failed', 'timeout', { step: 'callback' });
             }
           } else if (options.discovered) {

@@ -235,9 +235,9 @@ export function createIntegrationBrowser(options?: {
         if (attempts.has(id))
           logFailure('app_connection_expired', undefined, {
             step: returned
-              ? 'callback'
+              ? 'consent'
               : attempts.get(id)!.remote
-                ? 'consent'
+                ? 'pair'
                 : bootstrapped
                   ? 'start'
                   : 'open',
