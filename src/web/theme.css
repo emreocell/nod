@@ -29,7 +29,8 @@
   --surface-subtle: var(--gray-15);
   --surface-inset: var(--gray-20);
   --hover: var(--gray-20);
-  --nav-hover: color-mix(in srgb, var(--foreground) 6%, transparent);
+  --nav-hover: color-mix(in srgb, var(--accent-soft) 60%, transparent);
+  --nav-row-hover: color-mix(in srgb, var(--foreground) 6%, transparent);
   --nav-pressed: color-mix(in srgb, var(--foreground) 10%, transparent);
   --nav-selected: color-mix(in srgb, var(--accent) 14%, var(--sidebar));
   --foreground: var(--black);

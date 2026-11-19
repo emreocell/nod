@@ -575,7 +575,7 @@ input[type='range']:disabled {
   .sidebar .nav-link:hover,
   .settings-nav-item:hover,
   .settings-back.button:hover:not(:disabled) {
-    background: var(--nav-hover);
+    background: var(--nav-row-hover);
     color: var(--foreground);
   }
   .sidebar .nav-link:active,
