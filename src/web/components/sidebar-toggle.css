@@ -7,22 +7,26 @@
   width: 28px;
   height: 28px;
   color: var(--text-secondary);
-  transition: left 200ms var(--ease-enter);
   -webkit-app-region: no-drag;
-}
-.sidebar-toggle.button[data-tracking] {
-  transition: none;
 }
 :root[data-desktop='true'] .sidebar-toggle.button {
   --toggle-rest: 12px;
   top: calc((var(--desktop-titlebar-height) - 28px) / 2);
+  /* Position with left, not transform: the window-drag cut-out only follows layout. */
   left: var(--toggle-rest);
+  transition:
+    left 200ms var(--ease-enter),
+    background 140ms,
+    color 140ms;
 }
 :root[data-desktop='true'] .sidebar-toggle.button[data-lights] {
   --toggle-rest: 88px;
 }
 :root[data-fullscreen='true'] .sidebar-toggle.button[data-lights] {
   --toggle-rest: 20px;
+}
+.sidebar-toggle.button:active:not(:disabled) {
+  background: color-mix(in srgb, var(--foreground) 16%, transparent);
 }
 .sidebar-toggle-symbol {
   overflow: visible;
@@ -79,22 +83,24 @@
   inset-inline-start: 0;
 }
 :root[data-focus-input='keyboard'] .sidebar-resizer:focus-visible::after,
-.sidebar-resizing .sidebar-resizer::after {
+.sidebar-resizer[data-dragging]::after {
   opacity: 0.7;
 }
 @media (hover: hover) and (pointer: fine) {
   .sidebar-resizer:hover::after {
     opacity: 0.4;
-    transition: opacity 320ms ease 80ms;
+    transition: opacity 150ms ease 80ms;
   }
-  .sidebar-resizing .sidebar-resizer:hover::after {
+  .sidebar-resizer[data-dragging]:hover::after {
     opacity: 0.7;
     transition: opacity 120ms ease;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-toggle.button {
-    transition: none;
+  :root[data-desktop='true'] .sidebar-toggle.button {
+    transition:
+      background 140ms,
+      color 140ms;
   }
 }
 @media (pointer: coarse) {
@@ -103,7 +109,7 @@
     width: 44px;
   }
 }
-.sidebar-resizing {
+.app-shell:has(.sidebar-resizer[data-dragging]) {
   user-select: none;
 }
 @media (max-width: 800px) {

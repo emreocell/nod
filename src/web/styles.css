@@ -564,6 +564,7 @@ input[type='range']:disabled {
     padding: 0 var(--nav-row-inset);
     border-radius: var(--nav-row-radius);
     font-weight: 500;
+    transition: none;
   }
   .sidebar .nav-link svg,
   .settings-nav-item > svg,
@@ -577,10 +578,17 @@ input[type='range']:disabled {
     background: var(--nav-hover);
     color: var(--foreground);
   }
+  .sidebar .nav-link:active,
+  .settings-nav-item:active,
+  .settings-back.button:active:not(:disabled) {
+    background: var(--nav-pressed);
+  }
   .sidebar .nav-link-active,
   .sidebar .nav-link-active:hover,
+  .sidebar .nav-link-active:active,
   .settings-nav-item[aria-current='location'],
-  .settings-nav-item[aria-current='location']:hover {
+  .settings-nav-item[aria-current='location']:hover,
+  .settings-nav-item[aria-current='location']:active {
     background: var(--nav-selected);
     color: var(--foreground);
   }

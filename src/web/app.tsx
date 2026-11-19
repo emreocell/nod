@@ -31,6 +31,7 @@ import {
   SidebarResizer,
   SidebarToggle,
   readSidebarState,
+  toggleSidebarState,
   writeSidebarState,
 } from './components/sidebar-toggle';
 import { FeedbackDialog } from './components/feedback';
@@ -201,7 +202,7 @@ function Workspace({
     writeSidebarState(sidebar);
   }, [sidebar]);
   function toggleSidebar() {
-    setSidebar((value) => ({ ...value, hidden: !value.hidden }));
+    setSidebar(toggleSidebarState);
   }
   return (
     <div

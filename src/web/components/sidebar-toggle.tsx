@@ -26,6 +26,10 @@ export function writeSidebarState({ hidden, width }: SidebarState) {
   writeUiPreference('nod.sidebar-width', String(width));
 }
 
+export function toggleSidebarState(state: SidebarState): SidebarState {
+  return { ...state, hidden: !state.hidden };
+}
+
 export function SidebarToggle({
   hidden,
   unread,
@@ -75,9 +79,12 @@ export function SidebarResizer({
   width,
   onResize,
 }: SidebarState & { onResize(state: SidebarState): void }) {
-  const drag = useRef<{ offset: number; hidden: boolean; width: number; floor: number } | null>(
-    null,
-  );
+  const drag = useRef<{
+    offset: number;
+    hidden: boolean;
+    width: number;
+    restore: number;
+  } | null>(null);
   const { min, max } = limits();
   const track = (handle: HTMLElement, size?: number) => {
     const shell = handle.closest<HTMLElement>('.app-shell');
@@ -88,8 +95,6 @@ export function SidebarResizer({
     if (sidebar) sidebar.style.width = value;
     if (toolbar) toolbar.style.left = value;
     toggle?.style.setProperty('--desktop-sidebar-width', value);
-    toggle?.toggleAttribute('data-tracking', size !== undefined);
-    shell?.classList.toggle('sidebar-resizing', size !== undefined);
     return shell;
   };
   const key = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -126,11 +131,12 @@ export function SidebarResizer({
       onPointerDown={(event) => {
         if (event.button !== 0) return;
         event.currentTarget.setPointerCapture(event.pointerId);
+        event.currentTarget.toggleAttribute('data-dragging', true);
         drag.current = {
           offset: event.clientX - (hidden ? 0 : width),
           hidden,
           width,
-          floor: hidden ? width : min,
+          restore: width,
         };
       }}
       onPointerMove={(event) => {
@@ -140,25 +146,27 @@ export function SidebarResizer({
         const hide = position < min * (current.hidden ? 0.6 : 0.4);
         if (hide !== current.hidden) {
           current.hidden = hide;
-          current.floor = current.width;
+          if (!hide) current.width = min;
           track(event.currentTarget);
-          onResize({ hidden: hide, width: current.width });
+          onResize({ hidden: hide, width: hide ? current.restore : current.width });
         }
-        if (hide || position < current.floor) return;
-        current.floor = min;
-        current.width = Math.min(max, Math.round(position));
+        if (hide) return;
+        current.width = Math.min(max, Math.max(min, Math.round(position)));
         track(event.currentTarget, current.width);
       }}
       onPointerUp={(event) => {
         const current = drag.current;
         if (!current) return;
         drag.current = null;
-        track(event.currentTarget)?.style.setProperty('--sidebar-width', `${current.width}px`);
-        onResize({ hidden: current.hidden, width: current.width });
+        event.currentTarget.removeAttribute('data-dragging');
+        const width = current.hidden ? current.restore : current.width;
+        track(event.currentTarget)?.style.setProperty('--sidebar-width', `${width}px`);
+        onResize({ hidden: current.hidden, width });
       }}
       onLostPointerCapture={(event) => {
         if (!drag.current) return;
         drag.current = null;
+        event.currentTarget.removeAttribute('data-dragging');
         track(event.currentTarget);
         onResize({ hidden, width });
       }}
