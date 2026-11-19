@@ -289,6 +289,7 @@ function Startup() {
   const [welcome, setWelcome] = useState<WelcomeChoice | null>(null);
   const currentWelcome = useRef<WelcomeChoice | null>(null);
   const localChoiceSaved = useRef(false);
+  const welcomeContinued = useRef(false);
   const [welcomeStep, setWelcomeStep] = useState<'welcome' | 'waiting'>('welcome');
   const [handingOff, setHandingOff] = useState(false);
   const [welcomeError, setWelcomeError] = useState('');
@@ -339,7 +340,13 @@ function Startup() {
   }, []);
 
   useEffect(() => {
-    if (welcomeStep !== 'waiting' || !status.engineReady || !currentWelcome.current) return;
+    if (
+      welcomeStep !== 'waiting' ||
+      !status.engineReady ||
+      !currentWelcome.current ||
+      welcomeContinued.current
+    )
+      return;
     void saveWelcome({ ...currentWelcome.current, continued: true }).catch(() => {});
   }, [welcomeStep, status.engineReady]);
 
@@ -372,6 +379,7 @@ function Startup() {
     try {
       const saved = await desktop.saveSettings({ welcome: choice });
       localChoiceSaved.current = true;
+      if (choice.continued) welcomeContinued.current = true;
       acceptWelcome(saved.welcome ?? choice);
       if (choice.continued) await desktop.prepare();
     } catch (cause) {
