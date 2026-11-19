@@ -521,9 +521,25 @@
     transform: translateY(0);
   }
 }
+@media (min-width: 641px) {
+  :root[data-desktop='true'] .settings-page::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    width: var(--side-width);
+    height: var(--desktop-titlebar-height);
+    border-right: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+    background: var(--sidebar);
+    -webkit-app-region: drag;
+  }
+}
 @media (min-width: 641px) and (max-width: 900px) {
   .settings-sidebar {
     flex-basis: 208px;
+  }
+  :root[data-desktop='true'] .settings-page::before {
+    width: 208px;
   }
 }
 @media (max-width: 900px) {
