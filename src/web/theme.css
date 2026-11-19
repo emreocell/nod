@@ -125,7 +125,7 @@
   --nav-gap: 8px;
   --nav-row-radius: var(--radius-full);
   --nav-row-inset: 8px;
-  --nav-row-spacing: 2px;
+  --nav-row-spacing: 4px;
   --nav-rail-inset: calc((var(--side-rail-width) - 2 * var(--side-inset) - var(--nav-icon)) / 2);
   --text-body: 16px;
   --text-control: 14px;
