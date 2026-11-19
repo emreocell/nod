@@ -19,10 +19,12 @@ export function ServerAccess({ onConnected }: { onConnected(): Promise<boolean> 
         body: JSON.stringify({ key: key.trim() }),
       });
       if (!response.ok) {
+        const failure = await response.json().catch(() => undefined);
+        const reason = typeof failure?.error === 'string' ? failure.error.trim() : '';
         setError(
           response.status === 401
             ? 'Check your token and try again.'
-            : 'Could not connect. Try again.',
+            : `Could not connect (HTTP ${response.status})${reason ? `: ${reason.replace(/[.\s]+$/, '')}` : ''}. Try again.`,
         );
         return;
       }

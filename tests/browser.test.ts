@@ -8894,3 +8894,61 @@ test('navigation guards restore raw app history entries before leaving unsaved s
   });
   assert.equal(result.exitCode, 0, result.stderr || result.stdout);
 });
+
+test('server access shows the status and reason when the server refuses a token', async () => {
+  const result = await runProcess(process.execPath, ['--import', 'tsx', '--input-type=module'], {
+    timeoutMs: 20_000,
+    input: String.raw`
+      import assert from 'node:assert/strict';
+      import { JSDOM } from 'jsdom';
+      const dom = new JSDOM('<!doctype html><div id="root"></div>', {
+        url: 'https://nod.fixture.invalid', pretendToBeVisual: true,
+      });
+      Object.assign(globalThis, {
+        window: dom.window, document: dom.window.document,
+        IS_REACT_ACT_ENVIRONMENT: true, localStorage: dom.window.localStorage,
+        getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+        requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window),
+        cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
+      });
+      for (const name of ['Node', 'NodeFilter', 'Element', 'HTMLElement', 'HTMLInputElement',
+        'HTMLButtonElement', 'MutationObserver', 'Event', 'KeyboardEvent', 'CustomEvent', 'DOMParser'])
+        globalThis[name] = dom.window[name];
+      Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator });
+      window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+      let reply = Response.json({ error: 'Synthetic cross-site refusal.' }, { status: 403 });
+      globalThis.fetch = async path => {
+        assert.equal(path, '/api/access');
+        return reply;
+      };
+      const { createElement, act } = await import('react');
+      const { createRoot } = await import('react-dom/client');
+      const { ServerAccess } = await import('./src/web/components/server-access.tsx');
+      const root = createRoot(document.getElementById('root'));
+      try {
+        await act(async () => root.render(createElement(ServerAccess, { onConnected: async () => true })));
+        const submit = async () => {
+          const input = document.querySelector('input[name="token"]');
+          await act(async () => {
+            Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(input, 'synthetic-token');
+            input.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+          });
+          await act(async () => {
+            document.querySelector('form').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
+          });
+          await act(async () => new Promise(resolve => setTimeout(resolve, 10)));
+          return document.querySelector('form').textContent;
+        };
+        assert.match(await submit(), /Could not connect \(HTTP 403\): Synthetic cross-site refusal\. Try again\./);
+        reply = new Response('<html>Bad Gateway</html>', { status: 502 });
+        assert.match(await submit(), /Could not connect \(HTTP 502\)\. Try again\./);
+        reply = Response.json({ error: 'Synthetic invalid link.' }, { status: 401 });
+        assert.match(await submit(), /Check your token and try again\./);
+      } finally {
+        await act(async () => root.unmount());
+        dom.window.close();
+      }
+    `,
+  });
+  assert.equal(result.exitCode, 0, result.stdout + result.stderr);
+});
