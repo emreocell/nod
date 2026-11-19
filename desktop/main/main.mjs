@@ -1081,6 +1081,13 @@ function showEngine({ focus = true } = {}) {
   engineWindows.add(engineWindow);
   protectWindow(engineWindow, engineOrigin);
   const window = engineWindow;
+  for (const [name, fullScreen] of [
+    ['enter-full-screen', true],
+    ['leave-full-screen', false],
+  ])
+    window.on(name, () => {
+      if (!window.isDestroyed()) window.webContents.send('nod:fullscreen', fullScreen);
+    });
   window.webContents.on('render-process-gone', (_event, details) => {
     if (quitting || window.isDestroyed() || details.reason === 'clean-exit') return;
     void writeDiagnostic(
@@ -3070,6 +3077,10 @@ else {
           appUIOpenings.set(distinctId, opening);
         }
         return opening;
+      });
+      ipcMain.handle('nod:fullscreen:get', (event) => {
+        if (!isEngine(event)) throw new Error('This action is unavailable.');
+        return BrowserWindow.fromWebContents(event.sender)?.isFullScreen() ?? false;
       });
       ipcMain.handle('nod:preferences:get', (event) => {
         if (!isSetup(event) && !isEngine(event)) throw new Error('This action is unavailable.');

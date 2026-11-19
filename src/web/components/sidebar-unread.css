@@ -52,24 +52,12 @@
   left: calc(var(--nav-row-inset) + var(--nav-icon) - 5px);
   box-shadow: 0 0 0 2px var(--sidebar);
 }
-.sidebar-collapsed .nav-link .chat-unread-badge {
-  top: calc(50% - var(--nav-icon) / 2 - 8px);
-  right: auto;
-  left: calc(var(--nav-rail-inset) + var(--nav-icon) - 8px);
-  transform: none;
-}
-.sidebar-collapsed .nav-link .chat-status-dot {
-  left: calc(var(--nav-rail-inset) + var(--nav-icon) - 5px);
-}
 @media (max-width: 800px) {
   :root:not([data-desktop='true']) .nav-link .chat-unread-badge {
     top: calc(50% - var(--nav-icon) / 2 - 8px);
     right: auto;
-    left: calc(var(--nav-rail-inset) + var(--nav-icon) - 8px);
+    left: calc(var(--nav-row-inset) + var(--nav-icon) - 8px);
     transform: none;
-  }
-  :root:not([data-desktop='true']) .nav-link .chat-status-dot {
-    left: calc(var(--nav-rail-inset) + var(--nav-icon) - 5px);
   }
 }
 .sidebar .chat-status-dot[data-state='working'] {
