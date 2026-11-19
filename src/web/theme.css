@@ -29,7 +29,8 @@
   --surface-subtle: var(--gray-15);
   --surface-inset: var(--gray-20);
   --hover: var(--gray-20);
-  --nav-hover: color-mix(in srgb, var(--accent-soft) 60%, transparent);
+  --nav-hover: color-mix(in srgb, var(--foreground) 6%, transparent);
+  --nav-selected: color-mix(in srgb, var(--accent) 14%, var(--sidebar));
   --foreground: var(--black);
   --text-secondary: var(--gray-80);
   --muted-foreground: var(--gray-70);
@@ -108,6 +109,24 @@
   --input-height: 40px;
   --menu-radius: 12px;
   --menu-item-radius: 8px;
+  --side-width: 224px;
+  --side-rail-width: 96px;
+  --side-inset: 8px;
+  --side-bottom: 12px;
+  --side-mark: 24px;
+  --side-header: 32px;
+  --side-header-gap: 12px;
+  --side-header-inset: calc(var(--nav-row-inset) - (var(--side-mark) - var(--nav-icon)) / 2);
+  --side-rail-header-inset: calc(
+    (var(--side-rail-width) - 2 * var(--side-inset) - var(--side-mark)) / 2
+  );
+  --nav-icon: 16px;
+  --nav-row: 32px;
+  --nav-gap: 8px;
+  --nav-row-radius: var(--radius-full);
+  --nav-row-inset: 8px;
+  --nav-row-spacing: 2px;
+  --nav-rail-inset: calc((var(--side-rail-width) - 2 * var(--side-inset) - var(--nav-icon)) / 2);
   --text-body: 16px;
   --text-control: 14px;
   --text-title: 32px;
