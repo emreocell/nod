@@ -18,7 +18,7 @@
 }
 .sidebar-edge-toggle.button {
   position: absolute;
-  top: 50%;
+  top: calc(var(--desktop-titlebar-height, 0px) + var(--page-top) + var(--side-header) / 2);
   left: 0;
   display: grid;
   place-items: center;

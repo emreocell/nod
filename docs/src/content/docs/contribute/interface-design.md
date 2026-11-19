@@ -94,7 +94,7 @@ Don't show a construction grid. Keep the existing reduced-motion behaviour. The 
 
 The sidebar is 96 px wide when collapsed and 224 px when expanded. The main sidebar and the Settings sidebar share one set of tokens and one row style: a 24 px Nod mark, 16 px icons, 32 px rows 2 px apart, and an 8 px inset. Navigation starts under the mark. Hover is a neutral background (`--nav-hover`); the selected row uses `--nav-selected` with the Solid icon in pink. The mark and icons keep their size through the width transition and slide to the centre of the collapsed sidebar. Chat message actions and composer controls share 32 px targets and 4 px gaps.
 
-The sidebar toggle sits at the middle of its divider. Its rounded panel outline has a wider sidebar pane when open and a narrow inset when closed. Keep a 44 × 44 px target around the 32 × 32 px circular face. Reveal it near the edge after 120 ms, wait 300 ms before hiding it, and keep it visible through the sidebar transition. Keyboard focus and touch keep it available; reduced motion removes the animation and delays.
+The sidebar toggle sits on its divider, level with the Nod mark. Its rounded panel outline has a wider sidebar pane when open and a narrow inset when closed. Keep a 44 × 44 px target around the 32 × 32 px circular face. Reveal it near the edge after 120 ms, wait 300 ms before hiding it, and keep it visible through the sidebar transition. Keyboard focus and touch keep it available; reduced motion removes the animation and delays.
 
 ## Tooltips and shortcuts
 
