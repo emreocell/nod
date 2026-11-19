@@ -201,6 +201,10 @@ function Workspace({
   useEffect(() => {
     writeSidebarState(sidebar);
   }, [sidebar]);
+  useLayoutEffect(() => {
+    if (sidebar.hidden && document.activeElement?.closest('.sidebar'))
+      document.querySelector<HTMLElement>('.sidebar-toggle')?.focus();
+  }, [sidebar.hidden]);
   function toggleSidebar() {
     setSidebar(toggleSidebarState);
   }

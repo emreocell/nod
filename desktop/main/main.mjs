@@ -831,6 +831,14 @@ async function openExternal(value) {
 
 function protectWindow(window, origin) {
   if (origin) trackZoomFactor(window);
+  if (origin)
+    for (const [name, fullScreen] of [
+      ['enter-full-screen', true],
+      ['leave-full-screen', false],
+    ])
+      window.on(name, () => {
+        if (!window.isDestroyed()) window.webContents.send('nod:fullscreen', fullScreen);
+      });
   window.on('focus', updateReadinessNotice);
   for (const event of ['blur', 'hide', 'closed'])
     window.on(event, () => setTimeout(updateReadinessNotice, 100));
@@ -1081,13 +1089,6 @@ function showEngine({ focus = true } = {}) {
   engineWindows.add(engineWindow);
   protectWindow(engineWindow, engineOrigin);
   const window = engineWindow;
-  for (const [name, fullScreen] of [
-    ['enter-full-screen', true],
-    ['leave-full-screen', false],
-  ])
-    window.on(name, () => {
-      if (!window.isDestroyed()) window.webContents.send('nod:fullscreen', fullScreen);
-    });
   window.webContents.on('render-process-gone', (_event, details) => {
     if (quitting || window.isDestroyed() || details.reason === 'clean-exit') return;
     void writeDiagnostic(
