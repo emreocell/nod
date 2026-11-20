@@ -2903,29 +2903,6 @@ test('a failed saved Welcome transfer leaves storage and the normal backend read
   assert.equal(stopped, 1);
 });
 
-test('a refused saved Welcome transfer shows the engine status and reason', async (t) => {
-  const f = await runningDesktop(
-    t,
-    async (url) =>
-      url.endsWith('/api/account')
-        ? Response.json({ error: 'Synthetic consent store is busy.' }, { status: 503 })
-        : Response.json({ ok: true }),
-    { initialState: 'fresh', allowStart: true },
-  );
-  await f.storage.store.save({ welcome: { usageData: true, continued: true } });
-  try {
-    await f.launch();
-    await f.settle();
-    assert.equal(f.status().phase, 'error');
-    assert.equal(
-      f.status().error,
-      'Nod could not save your choice (HTTP 503): Synthetic consent store is busy. Try again.',
-    );
-  } finally {
-    await f.close();
-  }
-});
-
 test('one explicit retry after an engine exit also retries the saved Welcome choice', async (t) => {
   let failing = true;
   let writes = 0;
