@@ -12960,6 +12960,103 @@ test(
       `${new Date(Date.now() - 5000).toISOString()} update check result=offered version=9.9.9 for Marta Vidal\n`,
     );
     const scope = { turnId, sessionId, runId: childRun, parentRunId: mainRun, callId };
+    const { createBrowserWorkerFixture } = await import('./browser-fixture.ts');
+    const { withFailureLog } = await import('../src/ports/failure-log.ts');
+    let pickerGuard = 'control_covered';
+    const refusePicker = async () => {
+      throw Object.assign(new Error(privateText), {
+        signInGuard: pickerGuard,
+        cause: privateText,
+      });
+    };
+    const bridge = await createBrowserWorkerFixture({
+      computer: fakeComputer({
+        signInMethods: refusePicker,
+        selectSignInMethod: refusePicker,
+      }),
+    });
+    try {
+      const client = bridge.client('/synthetic/diagnostic-picker');
+      for (const [method, guard] of [
+        ['signInMethods', 'control_covered'],
+        ['signInMethods', 'control_changed'],
+        ['selectSignInMethod', 'control_changed'],
+      ]) {
+        pickerGuard = guard;
+        await assert.rejects(
+          withFailureLog(
+            (event, error, context) =>
+              failureJournal.record('failure', { event, error, context }, scope),
+            () =>
+              method === 'signInMethods'
+                ? client.signInMethods!('task', 'https://example.test', [
+                    { label: privateValues[0], selector: `[data-account="${privateValues[1]}"]` },
+                  ])
+                : client.selectSignInMethod!('task', {
+                    origin: 'https://example.test',
+                    document: 'synthetic-document',
+                    methodId: randomUUID(),
+                  }),
+          ),
+          (error: unknown) => {
+            assert.equal(Object(error).signInGuard, guard);
+            assert.ok(privateValues.every((value) => !Object(error).message.includes(value)));
+            return true;
+          },
+        );
+      }
+    } finally {
+      await bridge.close();
+    }
+    const { createDecisionModel } = await import('../src/providers/decisions.ts');
+    const { createMailCheck } = await import('../src/server/mail-check.ts');
+    const { privateEmailResult } = await import('../src/server/integration-result.ts');
+    for (const response of [
+      () => Response.json({ error: { message: privateText, code: privateText } }, { status: 503 }),
+      () => new Response(`{"private":${JSON.stringify(privateText)}`, { status: 200 }),
+      () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new Error(privateText));
+            },
+          }),
+          { status: 200 },
+        ),
+    ]) {
+      const model = createDecisionModel({
+        resolve: async () => ({ provider: 'openrouter', key: privateText }),
+        fetch: async () => response(),
+      });
+      const check = createMailCheck({
+        decisions: model,
+        curator: {
+          id: 'unused',
+          configured: false,
+          async curate() {
+            assert.fail('A failed decision must not use another model.');
+          },
+        },
+      });
+      const result = await withFailureLog(
+        (event, error) => failureJournal.record('failure', { event, error }, scope),
+        () =>
+          privateEmailResult(
+            {
+              messages: [
+                {
+                  id: 'synthetic-mail',
+                  from: 'sender@example.test',
+                  subject: privateText,
+                  body: privateText,
+                },
+              ],
+            },
+            check,
+          ),
+      );
+      assert.ok(privateValues.every((value) => !JSON.stringify(result).includes(value)));
+    }
     for (let index = 0; index < 3; index++)
       failureJournal.record(
         'failure',
@@ -13133,11 +13230,44 @@ test(
     assert.equal(report.logs[0].data.tool, 'apps');
     assert.equal(report.logs[0].data.input.query, 'Find the failed workflow');
     assert.equal(report.logs[1].data.output.statusCode, 503);
-    assert.equal(report.failures.length, 2);
+    assert.equal(report.failures.length, 8);
+    const mailFailures = report.failures.filter(
+      (row: any) => row.data.event === 'mail_check_failed',
+    );
+    assert.equal(mailFailures.length, 3);
+    assert.deepEqual(
+      mailFailures.map((row: any) => [row.data.error.code, row.data.error.status]).sort(),
+      [
+        ['decision_http', 503],
+        ['decision_json', 200],
+        ['decision_response', 200],
+      ],
+    );
+    assert.ok(mailFailures.every((row: any) => row.runId === child.runId && row.count === 1));
     const requestFailure = report.failures.find((row: any) => row.data.event === 'request_failed');
     const bridgeFailure = report.failures.find(
-      (row: any) => row.data.event === 'browser_bridge_failed',
+      (row: any) =>
+        row.data.event === 'browser_bridge_failed' && row.data.context.reason === 'exit',
     );
+    const pickerFailure = report.failures.find(
+      (row: any) => row.data.context?.signInGuard === 'control_covered',
+    );
+    const pickerFailures = report.failures.filter((row: any) => row.data.context?.signInGuard);
+    assert.deepEqual(
+      pickerFailures
+        .map((row: any) => [row.data.context.method, row.data.context.signInGuard, row.count])
+        .sort(),
+      [
+        ['selectSignInMethod', 'control_changed', 1],
+        ['signInMethods', 'control_changed', 1],
+        ['signInMethods', 'control_covered', 1],
+      ],
+    );
+    assert.equal(pickerFailure.data.error.code, 'unavailable');
+    assert.equal(pickerFailure.data.context.method, 'signInMethods');
+    assert.equal(pickerFailure.data.context.reason, 'error_response');
+    assert.equal(pickerFailure.count, 1);
+    assert.equal(pickerFailure.runId, child.runId);
     assert.match(requestFailure.data.error.message, /Gmail fetch failed with HTTP 503/);
     assert.equal(requestFailure.count, 1);
     assert.equal(bridgeFailure.data.context.exitCode, 137);
@@ -13303,6 +13433,47 @@ test(
     );
   },
 );
+
+test('feedback original spans remove private data before journal persistence and reload', async (t) => {
+  const { createFeedbackLog } = await import('../src/server/feedback-log.ts');
+  const { createFeedbackRedactor } = await import('../src/server/feedback-redaction.ts');
+  const root = await mkdtemp(join(tmpdir(), 'feedback-original-spans-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const redactor = createFeedbackRedactor({
+    secrets: ['/', '@', 'Author'],
+    profile: { names: [] },
+  });
+  const options = { dataRoot: root, ownerId: 'synthetic-owner', sanitize: redactor.value };
+  const log = await createFeedbackLog(options);
+  t.after(() => log.close());
+  log.record('failure', {
+    status: 503,
+    reason: 'Engine request failed',
+    message: '/Users/Synthetic Owner/PrivateLedger.docx',
+    detail: 'PrivateMailbox%40synthetic.invalid',
+    headers: ['Authorization', 'PrivateOpaqueValue'],
+  });
+  const snapshot = await log.snapshot();
+  assert.equal(snapshot.entries.length, 1);
+  assert.equal((snapshot.entries[0].data as { status: number }).status, 503);
+  const parent = join(root, 'feedback-logs');
+  const [directory] = await readdir(parent);
+  const persisted = await readFile(join(parent, directory, 'journal-0.jsonl'), 'utf8');
+  for (const privatePart of [
+    'Synthetic Owner',
+    'PrivateLedger',
+    'PrivateMailbox',
+    'synthetic.invalid',
+    'PrivateOpaqueValue',
+  ]) {
+    assert.ok(!persisted.includes(privatePart), privatePart);
+    assert.ok(!JSON.stringify(snapshot).includes(privatePart), privatePart);
+  }
+  await log.close();
+  const reopened = await createFeedbackLog(options);
+  t.after(() => reopened.close());
+  assert.deepEqual((await reopened.snapshot()).entries, snapshot.entries);
+});
 
 test('feedback journal redacts before persistence, survives restart, rotates and expires within its owner', async (t) => {
   const { createFeedbackLog } = await import('../src/server/feedback-log.ts');
@@ -13694,6 +13865,136 @@ test(
   },
 );
 
+test('transaction runs afterRollback callbacks when aborted before commit', async () => {
+  const { afterCommit, afterRollback, transaction } = await import('../src/server/transaction.ts');
+  const controller = new AbortController();
+  const reason = new Error('cancelled');
+  const released: Array<boolean | undefined> = [];
+  const client = {
+    async query(_sql: string) {
+      return { rows: [] };
+    },
+    release(destroy?: boolean) {
+      released.push(destroy);
+    },
+  };
+  const database = {
+    async connect() {
+      return client;
+    },
+  } as unknown as pg.Pool;
+  let rolledBack = 0;
+  let committed = 0;
+  await assert.rejects(
+    transaction(
+      async (tx) => {
+        afterRollback(tx, () => {
+          rolledBack++;
+        });
+        afterCommit(tx, () => {
+          committed++;
+        });
+        controller.abort(reason);
+      },
+      database,
+      controller.signal,
+    ),
+    (error) => error === reason,
+  );
+  assert.equal(rolledBack, 1);
+  assert.equal(committed, 0);
+  assert.deepEqual(released, [true]);
+
+  const afterCommitController = new AbortController();
+  const releasedAfterCommit: Array<boolean | undefined> = [];
+  const commitClient = {
+    async query(_sql: string) {
+      return { rows: [] };
+    },
+    release(destroy?: boolean) {
+      releasedAfterCommit.push(destroy);
+    },
+  };
+  let postCommitRollbacks = 0;
+  await transaction(
+    async (tx) => {
+      afterRollback(tx, () => {
+        postCommitRollbacks++;
+      });
+      afterCommit(tx, () => {
+        afterCommitController.abort(reason);
+      });
+    },
+    {
+      async connect() {
+        return commitClient;
+      },
+    } as unknown as pg.Pool,
+    afterCommitController.signal,
+  );
+  assert.equal(postCommitRollbacks, 0);
+  assert.deepEqual(releasedAfterCommit, [undefined]);
+});
+
+test(
+  'a transaction stopped while its commit is pending does not run its rollback callbacks',
+  { skip: !process.env.TEST_DATABASE_URL, timeout: 30_000 },
+  async (t) => {
+    const { afterRollback, transaction } = await import('../src/server/transaction.ts');
+    const schema = `test_commit_stop_${randomUUID().replaceAll('-', '')}`;
+    const admin = new pg.Pool({ connectionString: process.env.TEST_DATABASE_URL });
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    const pool = new pg.Pool({
+      connectionString: process.env.TEST_DATABASE_URL,
+      options: `-c search_path=${schema}`,
+    });
+    let pid = 0;
+    t.after(async () => {
+      await pool.end();
+      if (pid) await admin.query('SELECT pg_terminate_backend($1)', [pid]);
+      await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+      await admin.end();
+    });
+    await pool.query(`
+      CREATE TABLE held(id int);
+      CREATE FUNCTION hold_commit() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN PERFORM pg_sleep(20); RETURN NULL; END $$;
+      CREATE CONSTRAINT TRIGGER hold_commit AFTER INSERT ON held
+        DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION hold_commit();
+    `);
+    const controller = new AbortController();
+    let rolledBack = 0;
+    const pending = transaction(
+      async (client) => {
+        pid = (await client.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+        await client.query('INSERT INTO held VALUES (1)');
+        afterRollback(client, () => {
+          rolledBack++;
+        });
+      },
+      pool,
+      controller.signal,
+    );
+    const rejected = assert.rejects(pending);
+    let committing = false;
+    for (const deadline = Date.now() + 10_000; !committing && Date.now() < deadline;) {
+      committing = Boolean(
+        (
+          await admin.query(
+            "SELECT 1 FROM pg_stat_activity WHERE pid=$1 AND state='active' AND query='COMMIT'",
+            [pid],
+          )
+        ).rowCount,
+      );
+      if (!committing) await delay(10);
+    }
+    assert.ok(committing);
+    controller.abort(new Error('Synthetic Stop'));
+    await rejected;
+    assert.equal(rolledBack, 0);
+  },
+);
+
 test('a first task stays open after its chat turn ends and follows its own saved task', () => {
   const messages = [
     { id: 'old-request', role: 'user' as const, text: 'Draft the reply', turnId: 'old-turn' },
@@ -13722,6 +14023,23 @@ test('a first task stays open after its chat turn ends and follows its own saved
   assert.equal(status(), 'idle');
   state.tasks = [];
   assert.equal(status(), 'sent');
+});
+
+test('the onboarding brief masks each link and keeps the fields after it', async () => {
+  const { masked } = await import('../src/server/onboarding-suggestions.ts');
+  const event = {
+    htmlLink: 'https://calendar.example.test/event?eid=abc',
+    start: { dateTime: '2026-10-24T09:00:00Z' },
+    end: { dateTime: '2026-10-24T09:30:00Z' },
+    summary: 'Planning',
+  };
+  assert.deepEqual(JSON.parse(masked(JSON.stringify({ items: [event, event] }))), {
+    items: [event, event].map((item) => ({ ...item, htmlLink: '[link]' })),
+  });
+  const quoted = { note: 'Open https://files.example.test/a"b?token=zzz then reply', next: 'kept' };
+  const brief = masked(JSON.stringify(quoted));
+  assert.deepEqual(JSON.parse(brief), { note: 'Open [link] then reply', next: 'kept' });
+  assert.ok(!brief.includes('zzz'));
 });
 
 test(
